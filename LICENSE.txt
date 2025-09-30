@@ -1,0 +1,9 @@
+Stemwise – Proprietary License
+
+Copyright (c) 2025 Jintana Flowers. All rights reserved.
+
+This repository and its contents are provided for use with the Stemwise application only.
+You may view this code to run the app, but you may not copy, modify, distribute, sublicense,
+or use it to create derivative works without explicit written permission from Jintana Flowers.
+
+For commercial licensing, contact: info@jintanaflowers.co.uk
