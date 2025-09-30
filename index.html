@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stemwise – Count • Cost • Price</title>
+  <meta name="theme-color" content="#0B5D3E" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="./assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Stemwise</h1>
+    <div class="tagline">Count • Cost • Price</div>
+    <button id="installBtn" class="btn secondary" hidden>Install</button>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Business Settings</h2>
+      <div class="grid">
+        <label>VAT registration date
+          <input type="date" id="vatRegisteredFrom" />
+        </label>
+        <label>VAT rate (%)
+          <input type="number" id="vatRate" step="1" />
+        </label>
+        <label>Labour rate (£/hour)
+          <input type="number" id="laborRate" step="0.01" />
+        </label>
+        <label>Invoice-level fees to spread (£)
+          <input type="number" id="globalFees" step="0.01" />
+        </label>
+        <label>Fee share mode
+          <select id="feeShareMode">
+            <option value="byValue">Proportional by value</option>
+            <option value="none">Do not spread</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Cost Database</h2>
+        <div class="row-actions">
+          <button id="addRow" class="btn">Add</button>
+          <label class="btn secondary file-label">
+            <input type="file" id="importCSV" accept=".csv" />
+            Import CSV
+          </label>
+          <button id="exportCSV" class="btn secondary">Export CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="costTable">
+          <thead>
+            <tr>
+              <th>Variety</th>
+              <th>Grade</th>
+              <th>Supplier</th>
+              <th>Pack size</th>
+              <th>Stems/pack</th>
+              <th>Pack price (£)</th>
+              <th>Invoice date</th>
+              <th>Cost/stem ex-VAT*</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted">
+        * If the invoice date is before your VAT registration date, pack prices are treated as including value-added tax and converted to excluding value-added tax. 
+        Invoice-level fees (if any) are proportionally applied by value.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Photo Assist (Beta)</h2>
+      </div>
+      <p class="muted">Load an arrangement photo. Pick a flower from your database, then tap/click each stem in the photo to count it. Counts sync to the Arrangement list below. (Automatic detection can be added later.)</p>
+      <div class="photo-assist">
+        <div class="photo-controls">
+          <label class="btn secondary file-label">
+            <input type="file" id="photoInput" accept="image/*" />
+            Load photo
+          </label>
+          <select id="photoVarietySelect"><option value="">Select flower...</option></select>
+          <button id="clearMarkers" class="btn secondary" disabled>Clear markers</button>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="photoCanvas"></canvas>
+        </div>
+        <div class="muted" id="photoHelp">Tip: zoom with pinch (mobile) or Ctrl+scroll (desktop) then click to add a marker.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Arrangement Cost & Price</h2>
+      <div id="arrangementList"></div>
+      <div class="row">
+        <button id="addItem" class="btn">Add flower</button>
+      </div>
+
+      <div class="grid">
+        <label>Sundries ex-VAT (£)
+          <input type="number" id="sundries" step="0.01" />
+        </label>
+        <label>Wastage (%)
+          <input type="number" id="wastagePct" step="1" />
+        </label>
+        <label>Labour (minutes)
+          <input type="number" id="laborMinutes" step="1" />
+        </label>
+        <label>Target margin (%)
+          <input type="number" id="targetMarginPct" step="1" />
+        </label>
+      </div>
+
+      <div class="grid two">
+        <div class="subcard">
+          <h3>Breakdown (ex-VAT)</h3>
+          <div id="breakdownList" class="kv"></div>
+        </div>
+        <div class="subcard">
+          <h3>Suggested Retail</h3>
+          <div class="kv">
+            <div><span>Margin</span><strong id="margin">£0.00</strong></div>
+            <div><span>Retail ex-VAT</span><strong id="retailEx">£0.00</strong></div>
+            <div><span>Retail inc-VAT</span><strong id="retailInc">£0.00</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="muted">Pricing logic: cost per stem is calculated excluding value-added tax, converting pre-registration invoice prices to ex-VAT. Invoice-level fees can be shared by value. Suggested retail adds target margin, then value-added tax.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Offline-ready • Your data stays in your browser (local storage)</span>
+  </footer>
+
+  <script type="module" src="./detect.js"></script>
+  <script type="module" src="./app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(console.error); }); }
+  </script>
+</body>
+</html>
