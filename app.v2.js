@@ -2,6 +2,7 @@
 import { classifySingle } from './detect.js';
 
 
+
 const LS_KEY = 'stemwise-app-v1';
 
 // ---------- UI status banner ----------
