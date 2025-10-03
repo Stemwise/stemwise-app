@@ -1,5 +1,5 @@
 
-import { classifySingle } from './detect.js';
+import { classifySingle } from './detect.v2.js';
 
 const LS_KEY = 'stemwise-app-v1';
 
@@ -20,345 +20,257 @@ const state = {
 };
 
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function money(n){ if (Number.isNaN(n)) return '£0.00'; return new Intl.NumberFormat('en-GB', { style:'currency', currency:'GBP', maximumFractionDigits:2 }).format(n); }
-function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function money(n){ if (Number.isNaN(n)) return '£0.00'; return new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP',maximumFractionDigits:2}).format(n); }
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
 function load(){
-  const raw = localStorage.getItem(LS_KEY);
-  if (!raw) {
-    const r1 = { id: uid(), variety: 'Rose Freedom', grade:'60cm', supplier:'DutchXpress', packSize:'20 stems', stemsPerPack: 20, packPrice: 15.6, invoiceDate:'2025-09-20', notes:'High head size' };
-    const r2 = { id: uid(), variety: 'Lisianthus White', grade:'XL', supplier:'Aalsmeer', packSize:'10 stems', stemsPerPack: 10, packPrice: 5.2, invoiceDate:'2025-09-22', notes:'' };
-    const r3 = { id: uid(), variety: 'Eucalyptus Parvifolia', grade:'Mix', supplier:'UK Wholesaler', packSize:'10 stems', stemsPerPack: 10, packPrice: 2.8, invoiceDate:'2025-09-18', notes:'' };
-    state.rows = [r1, r2, r3];
-    state.arrangement = [{ rowId: r1.id, qty: 12 }, { rowId: r2.id, qty: 6 }, { rowId: r3.id, qty: 8 }];
-    state.sundries = 1.1; state.wastagePct = 3; state.laborMinutes = 20;
-    save();
-  } else {
-    const obj = JSON.parse(raw);
-    Object.assign(state, obj);
-  }
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) {
+      const r1 = { id: uid(), variety: 'Rose Freedom', grade:'60cm', supplier:'DutchXpress', packSize:'20 stems', stemsPerPack: 20, packPrice: 15.6, invoiceDate:'2025-09-20', notes:'' };
+      const r2 = { id: uid(), variety: 'Lisianthus White', grade:'XL', supplier:'Aalsmeer', packSize:'10 stems', stemsPerPack: 10, packPrice: 5.2, invoiceDate:'2025-09-22', notes:'' };
+      state.rows = [r1, r2];
+      state.arrangement = [{ rowId: r1.id, qty: 12 }];
+      state.sundries = 1.1; state.wastagePct = 3; state.laborMinutes = 20;
+      save();
+    } else {
+      Object.assign(state, JSON.parse(raw));
+    }
+  } catch(e) { console.warn(e); }
 }
 load();
 
-// Elements
+// ---------- CSV parsing (robust) ----------
+function stripBOM(s){ if (s && s.charCodeAt(0) === 0xFEFF) return s.slice(1); return s; }
+function detectDelimiter(sample){
+  const candidates = [',',';','\t','|'];
+  let best = ','; let bestScore = -1;
+  for (const d of candidates){
+    const lines = sample.split(/\r?\n/).slice(0, 10).filter(Boolean);
+    if (!lines.length) continue;
+    const counts = lines.map(l => (l.match(new RegExp(escapeRegExp(d), 'g'))||[]).length);
+    const variance = counts.length ? stddev(counts) : 0;
+    const mean = counts.length ? counts.reduce((a,b)=>a+b,0)/counts.length : 0;
+    // prefer higher mean (many columns) and low variance (consistent columns)
+    const score = mean - variance*0.5;
+    if (score > bestScore){ bestScore = score; best = d; }
+  }
+  return best;
+}
+function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function stddev(arr){ const m = arr.reduce((a,b)=>a+b,0)/arr.length; return Math.sqrt(arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length); }
+
+function splitCSVLine(line, delim){
+  // RFC4180-ish, supports quotes and escaped quotes "" inside
+  const out = [];
+  let cur = ''; let inQ = false;
+  for (let i=0;i<line.length;i++){
+    const ch = line[i];
+    if (ch === '"'){
+      if (inQ && line[i+1] === '"'){ cur += '"'; i++; } // escaped quote
+      else { inQ = !inQ; }
+      continue;
+    }
+    if (ch === delim && !inQ){ out.push(cur); cur=''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+function normaliseHeader(h){
+  return h.toLowerCase().replace(/[\s_-]+/g,'').replace(/[^\w]/g,'');
+}
+function parseCSV(text){
+  const clean = stripBOM(String(text||'').trim());
+  if (!clean) return { header:[], rows:[] , delim: ','};
+  const lines = clean.split(/\r?\n/);
+  const delim = detectDelimiter(lines.slice(0,10).join('\n'));
+  const header = splitCSVLine(lines.shift(), delim).map(normaliseHeader);
+  const rows = [];
+  for (const line of lines){
+    if (!line.trim()) continue;
+    const cells = splitCSVLine(line, delim);
+    rows.push(cells);
+  }
+  return { header, rows, delim };
+}
+function idx(header, name){
+  const aliases = Array.isArray(name) ? name : [name];
+  for (const a of aliases){
+    const i = header.indexOf(normaliseHeader(a));
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+
+// ---------- DOM refs ----------
+const addRowBtn = document.getElementById('addRow');
+const costTableBody = document.querySelector('#costTable tbody');
+const importCSVEl = document.getElementById('importCSV');
+const exportCSVBtn = document.getElementById('exportCSV');
+
 const vatRegisteredFromEl = document.getElementById('vatRegisteredFrom');
 const vatRateEl = document.getElementById('vatRate');
 const laborRateEl = document.getElementById('laborRate');
 const globalFeesEl = document.getElementById('globalFees');
 const feeShareModeEl = document.getElementById('feeShareMode');
 
-const addRowBtn = document.getElementById('addRow');
-const exportCSVBtn = document.getElementById('exportCSV');
-const importCSVEl = document.getElementById('importCSV');
-const costTableBody = document.querySelector('#costTable tbody');
-
-const addItemBtn = document.getElementById('addItem');
 const arrangementList = document.getElementById('arrangementList');
-
+const addItemBtn = document.getElementById('addItem');
 const sundriesEl = document.getElementById('sundries');
 const wastagePctEl = document.getElementById('wastagePct');
 const laborMinutesEl = document.getElementById('laborMinutes');
 const targetMarginPctEl = document.getElementById('targetMarginPct');
-
 const breakdownListEl = document.getElementById('breakdownList');
 const marginEl = document.getElementById('margin');
 const retailExEl = document.getElementById('retailEx');
 const retailIncEl = document.getElementById('retailInc');
 
-const photoInput = document.getElementById('photoInput');
-const photoCanvas = document.getElementById('photoCanvas');
-const photoCtx = photoCanvas.getContext('2d');
-const photoVarietySelect = document.getElementById('photoVarietySelect');
-const clearMarkersBtn = document.getElementById('clearMarkers');
-
+// ---------- Settings ----------
 function bindSettings(){
-  vatRegisteredFromEl.value = state.vatRegisteredFrom;
-  vatRateEl.value = state.vatRate;
-  laborRateEl.value = state.laborRate;
-  globalFeesEl.value = state.globalFees;
-  feeShareModeEl.value = state.feeShareMode;
-
-  vatRegisteredFromEl.oninput = () => { state.vatRegisteredFrom = vatRegisteredFromEl.value; save(); renderAll(); };
-  vatRateEl.oninput = () => { state.vatRate = Number(vatRateEl.value)||0; save(); renderAll(); };
-  laborRateEl.oninput = () => { state.laborRate = Number(laborRateEl.value)||0; save(); renderAll(); };
-  globalFeesEl.oninput = () => { state.globalFees = Number(globalFeesEl.value)||0; save(); renderAll(); };
-  feeShareModeEl.onchange = () => { state.feeShareMode = feeShareModeEl.value; save(); renderAll(); };
+  if (vatRegisteredFromEl) vatRegisteredFromEl.value = state.vatRegisteredFrom;
+  if (vatRateEl) vatRateEl.value = state.vatRate;
+  if (laborRateEl) laborRateEl.value = state.laborRate;
+  if (globalFeesEl) globalFeesEl.value = state.globalFees;
+  if (feeShareModeEl) feeShareModeEl.value = state.feeShareMode;
+  if (vatRegisteredFromEl) vatRegisteredFromEl.oninput = ()=>{ state.vatRegisteredFrom = vatRegisteredFromEl.value; save(); renderAll(); };
+  if (vatRateEl) vatRateEl.oninput = ()=>{ state.vatRate = Number(vatRateEl.value)||0; save(); renderAll(); };
+  if (laborRateEl) laborRateEl.oninput = ()=>{ state.laborRate = Number(laborRateEl.value)||0; save(); renderAll(); };
+  if (globalFeesEl) globalFeesEl.oninput = ()=>{ state.globalFees = Number(globalFeesEl.value)||0; save(); renderAll(); };
+  if (feeShareModeEl) feeShareModeEl.onchange = ()=>{ state.feeShareMode = feeShareModeEl.value; save(); renderAll(); };
 }
 
-function toCSV(rows){
-  const header = ['variety','grade','supplier','packSize','stemsPerPack','packPrice','invoiceDate','notes'];
-  const body = rows.map(r=>[r.variety,r.grade,r.supplier,r.packSize,r.stemsPerPack,r.packPrice,r.invoiceDate, r.notes||''].join(','));
-  return [header.join(','), ...body].join('\n');
-}
-function parseCSV(text){
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return [];
-  const header = lines[0].split(',').map(h=>h.trim().toLowerCase());
-  const idx = name => header.indexOf(name);
-  const out = [];
-  for (let i=1; i<lines.length; i++){
-    const cells = lines[i].split(',').map(c=>c.trim());
-    const row = {
-      id: uid(),
-      variety: cells[idx('variety')] || '',
-      grade: cells[idx('grade')] || '',
-      supplier: cells[idx('supplier')] || '',
-      packSize: cells[idx('packsize')] || cells[idx('pack_size')] || '',
-      stemsPerPack: Number(cells[idx('stemsperpack')] || cells[idx('stems_per_pack')] || 0),
-      packPrice: Number(cells[idx('packprice')] || cells[idx('pack_price')] || 0),
-      invoiceDate: cells[idx('invoicedate')] || cells[idx('invoice_date')] || new Date().toISOString().slice(0,10),
-      notes: cells[idx('notes')] || ''
-    };
-    out.push(row);
-  }
-  return out;
-}
+// ---------- Costing helpers ----------
+function isAfterReg(d){ return d >= state.vatRegisteredFrom; }
+function costPerStemExVAT(r){ const packEx = isAfterReg(r.invoiceDate) ? r.packPrice : (r.packPrice/(1+state.vatRate/100)); return packEx/(r.stemsPerPack||1); }
+function totalRowValueExVAT(r){ return costPerStemExVAT(r)*(r.stemsPerPack||0); }
+function totalInvoiceValueExVAT(){ return state.rows.reduce((a,r)=>a+totalRowValueExVAT(r),0); }
+function feePerStemExVAT(r){ if(state.feeShareMode==='none') return 0; const total=totalInvoiceValueExVAT(); if(!total) return 0; const share=(totalRowValueExVAT(r)/total)*(state.globalFees||0); return share/(r.stemsPerPack||1); }
+function displayCostPerStemExVAT(r){ return costPerStemExVAT(r)+feePerStemExVAT(r); }
 
-// Cost math
-function isAfterRegistration(dateStr){ return dateStr >= state.vatRegisteredFrom; }
-function costPerStemExVAT(r){ const packEx = isAfterRegistration(r.invoiceDate) ? r.packPrice : (r.packPrice / (1 + state.vatRate/100)); return (packEx / (r.stemsPerPack || 1)); }
-function totalRowValueExVAT(r){ return costPerStemExVAT(r) * (r.stemsPerPack || 0); }
-function totalInvoiceValueExVAT(){ return state.rows.reduce((acc,r)=> acc + totalRowValueExVAT(r), 0); }
-function feePerStemExVAT(r){
-  if (state.feeShareMode === 'none') return 0;
-  const total = totalInvoiceValueExVAT(); if (total === 0) return 0;
-  const share = (totalRowValueExVAT(r) / total) * (state.globalFees || 0);
-  return share / (r.stemsPerPack || 1);
-}
-function displayCostPerStemExVAT(r){ return costPerStemExVAT(r) + feePerStemExVAT(r); }
-
+// ---------- Renderers ----------
 function renderCostTable(){
+  if (!costTableBody) return;
   costTableBody.innerHTML = '';
-  state.rows.forEach((r) => {
+  state.rows.forEach((r)=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><input value="${r.variety}" /></td>
-      <td><input value="${r.grade}" /></td>
-      <td><input value="${r.supplier}" /></td>
-      <td><input value="${r.packSize}" /></td>
-      <td><input type="number" value="${r.stemsPerPack}" /></td>
-      <td><input type="number" step="0.01" value="${r.packPrice}" /></td>
-      <td><input type="date" value="${r.invoiceDate}" /></td>
-      <td class="muted">${money(displayCostPerStemExVAT(r))}</td>
-      <td><input value="${r.notes||''}" /></td>
-      <td><button class="btn danger">Del</button></td>
-    `;
-    const [vEl,gEl,sEl,psEl,spEl,ppEl,idEl,_,nEl,delBtn] = tr.querySelectorAll('input,button');
-    vEl.oninput = ()=>{ r.variety = vEl.value; save(); renderAll(); };
-    gEl.oninput = ()=>{ r.grade = gEl.value; save(); renderAll(); };
-    sEl.oninput = ()=>{ r.supplier = sEl.value; save(); renderAll(); };
-    psEl.oninput = ()=>{ r.packSize = psEl.value; save(); renderAll(); };
-    spEl.oninput = ()=>{ r.stemsPerPack = Number(spEl.value)||0; save(); renderAll(); };
-    ppEl.oninput = ()=>{ r.packPrice = Number(ppEl.value)||0; save(); renderAll(); };
-    idEl.oninput = ()=>{ r.invoiceDate = idEl.value; save(); renderAll(); };
-    nEl.oninput = ()=>{ r.notes = nEl.value; save(); };
-    delBtn.onclick = ()=>{ state.rows = state.rows.filter(x=>x.id!==r.id); save(); renderAll(); };
+      <td><input value="${r.variety || ''}"/></td>
+      <td><input value="${r.grade||''}"/></td>
+      <td><input value="${r.supplier||''}"/></td>
+      <td><input value="${r.packSize||''}"/></td>
+      <td><input type="number" value="${r.stemsPerPack||0}"/></td>
+      <td><input type="number" step="0.01" value="${r.packPrice||0}"/></td>
+      <td><input type="date" value="${r.invoiceDate||''}"/></td>
+      <td class="muted">£${displayCostPerStemExVAT(r).toFixed(2)}</td>
+      <td><input value="${r.notes||''}"/></td>
+      <td><button class="btn danger">Del</button></td>`;
+    const [v,g,s,ps,sp,pp,id,_,n,del] = tr.querySelectorAll('input,button');
+    v.oninput=()=>{r.variety=v.value;save();renderAll();};
+    g.oninput=()=>{r.grade=g.value;save();renderAll();};
+    s.oninput=()=>{r.supplier=s.value;save();renderAll();};
+    ps.oninput=()=>{r.packSize=ps.value;save();renderAll();};
+    sp.oninput=()=>{r.stemsPerPack=Number(sp.value)||0;save();renderAll();};
+    pp.oninput=()=>{r.packPrice=Number(pp.value)||0;save();renderAll();};
+    id.oninput=()=>{r.invoiceDate=id.value;save();renderAll();};
+    n.oninput=()=>{r.notes=n.value;save();};
+    del.onclick=()=>{state.rows=state.rows.filter(x=>x!==r);save();renderAll();};
     costTableBody.appendChild(tr);
   });
 }
 
 function renderArrangement(){
-  arrangementList.innerHTML = '';
-  state.arrangement.forEach((a, idx)=>{
-    const row = state.rows.find(r=>r.id===a.rowId);
-    const div = document.createElement('div');
-    div.className = 'item-row';
-    const options = state.rows.map(r=>`<option value="${r.id}" ${r.id===a.rowId?'selected':''}>${r.variety} ${r.grade?`(${r.grade})`:''}</option>`).join('');
-    div.innerHTML = `
-      <select>${options}</select>
-      <input type="number" value="${a.qty}" />
-      <div class="readonly">${row?money(displayCostPerStemExVAT(row)):'-'}</div>
-      <div class="del"><button class="btn danger" title="Delete">×</button></div>
-    `;
-    const [sel, qtyEl, , delBtn] = div.querySelectorAll('select,input,div,button');
-    sel.onchange = ()=>{ a.rowId = sel.value; save(); renderAll(); };
-    qtyEl.oninput = ()=>{ a.qty = Number(qtyEl.value)||0; save(); renderAll(); };
-    delBtn.onclick = ()=>{ state.arrangement = state.arrangement.filter((_,i)=>i!==idx); save(); renderAll(); };
+  if (!arrangementList) return;
+  arrangementList.innerHTML='';
+  state.arrangement.forEach((a,i)=>{
+    const row=state.rows.find(r=>r.id===a.rowId);
+    const div=document.createElement('div'); div.className='item-row';
+    const options=state.rows.map(r=>`<option value="${r.id}" ${r.id===a.rowId?'selected':''}>${r.variety} ${r.grade?`(${r.grade})`:''}</option>`).join('');
+    div.innerHTML=`<select>${options}</select><input type="number" value="${a.qty||0}"/><div class="readonly">${row?money(displayCostPerStemExVAT(row)):'-'}</div><div class="del"><button class="btn danger">×</button></div>`;
+    const [sel,qty,,del]=div.querySelectorAll('select,input,div,button');
+    sel.onchange=()=>{a.rowId=sel.value;save();renderAll();};
+    qty.oninput=()=>{a.qty=Number(qty.value)||0;save();renderAll();};
+    del.onclick=()=>{state.arrangement=state.arrangement.filter((_,j)=>j!==i);save();renderAll();};
     arrangementList.appendChild(div);
   });
-  renderPhotoVarietyOptions();
 }
 
 function calcBreakdown(){
-  const items = state.arrangement.map((a)=>{
-    const r = state.rows.find(x=>x.id===a.rowId);
-    if (!r) return null;
-    const cpsEx = displayCostPerStemExVAT(r);
-    const lineEx = cpsEx * (a.qty || 0);
-    return { id:a.rowId, label: `${r.variety} ${r.grade||''}`.trim(), qty:a.qty||0, cpsEx, lineEx };
-  }).filter(Boolean);
-
-  const stemsEx = items.reduce((s,i)=> s + i.lineEx, 0);
-  const wastage = stemsEx * ((state.wastagePct||0)/100);
-  const laborEx = (state.laborRate/60) * (state.laborMinutes||0);
-  const sundriesEx = state.sundries||0;
-  const totalEx = stemsEx + wastage + sundriesEx + laborEx;
-  const margin = totalEx * ((state.targetMarginPct||0)/100);
-  const retailEx = totalEx + margin;
-  const retailInc = retailEx * (1 + (state.vatRate||0)/100);
-
-  return { items, stemsEx, wastage, laborEx, sundriesEx, totalEx, margin, retailEx, retailInc };
+  const items=state.arrangement.map(a=>{ const r=state.rows.find(x=>x.id===a.rowId); if(!r)return null; const cps=displayCostPerStemExVAT(r); const line=cps*(a.qty||0); return {label:`${r.variety} ${r.grade||''}`.trim(),qty:a.qty||0,lineEx:line}; }).filter(Boolean);
+  const stemsEx=items.reduce((s,i)=>s+i.lineEx,0);
+  const wastage=stemsEx*((state.wastagePct||0)/100);
+  const laborEx=(state.laborRate/60)*(state.laborMinutes||0);
+  const sundriesEx=state.sundries||0;
+  const totalEx=stemsEx+wastage+sundriesEx+laborEx;
+  const margin=totalEx*((state.targetMarginPct||0)/100);
+  const retailEx=totalEx+margin;
+  const retailInc=retailEx*(1+(state.vatRate||0)/100);
+  return {items,stemsEx,wastage,sundriesEx,laborEx,totalEx,margin,retailEx,retailInc};
 }
-
 function renderBreakdown(){
-  const b = calcBreakdown();
-  breakdownListEl.innerHTML = '';
-  b.items.forEach(i=>{
-    const row = document.createElement('div');
-    row.innerHTML = `<span>${i.label} × ${i.qty}</span><strong>${money(i.lineEx)}</strong>`;
-    breakdownListEl.appendChild(row);
-  });
-  const addKV = (label, val)=>{
-    const row = document.createElement('div');
-    row.innerHTML = `<span>${label}</span><strong>${money(val)}</strong>`;
-    breakdownListEl.appendChild(row);
-  };
-  breakdownListEl.appendChild(document.createElement('hr'));
-  addKV('Stems subtotal', b.stemsEx);
-  addKV('Wastage', b.wastage);
-  addKV('Sundries', b.sundriesEx);
-  addKV('Labour', b.laborEx);
-  breakdownListEl.appendChild(document.createElement('hr'));
-  addKV('Total ex-VAT', b.totalEx);
-
-  marginEl.textContent = money(b.margin);
-  retailExEl.textContent = money(b.retailEx);
-  retailIncEl.textContent = money(b.retailInc);
+  if (!breakdownListEl) return;
+  const b=calcBreakdown(); breakdownListEl.innerHTML='';
+  b.items.forEach(i=>{ const row=document.createElement('div'); row.innerHTML=`<span>${i.label} × ${i.qty}</span><strong>£${i.lineEx.toFixed(2)}</strong>`; breakdownListEl.appendChild(row); });
+  const add=(k,v)=>{ const row=document.createElement('div'); row.innerHTML=`<span>${k}</span><strong>£${v.toFixed(2)}</strong>`; breakdownListEl.appendChild(row); };
+  breakdownListEl.appendChild(document.createElement('hr')); add('Stems subtotal',b.stemsEx); add('Wastage',b.wastage); add('Sundries',b.sundriesEx); add('Labour',b.laborEx); breakdownListEl.appendChild(document.createElement('hr')); add('Total ex-VAT',b.totalEx);
+  marginEl.textContent=`£${b.margin.toFixed(2)}`; retailExEl.textContent=`£${b.retailEx.toFixed(2)}`; retailIncEl.textContent=`£${b.retailInc.toFixed(2)}`;
 }
 
-function bindArrangementInputs(){
-  sundriesEl.value = state.sundries;
-  wastagePctEl.value = state.wastagePct;
-  laborMinutesEl.value = state.laborMinutes;
-  targetMarginPctEl.value = state.targetMarginPct;
+// ---------- Actions ----------
+if (addRowBtn) addRowBtn.onclick = ()=>{
+  state.rows.push({ id: uid(), variety:'', grade:'', supplier:'', packSize:'', stemsPerPack:0, packPrice:0, invoiceDate:new Date().toISOString().slice(0,10), notes:'' });
+  save(); renderAll();
+};
 
-  sundriesEl.oninput = ()=>{ state.sundries = Number(sundriesEl.value)||0; save(); renderAll(); };
-  wastagePctEl.oninput = ()=>{ state.wastagePct = Number(wastagePctEl.value)||0; save(); renderAll(); };
-  laborMinutesEl.oninput = ()=>{ state.laborMinutes = Number(laborMinutesEl.value)||0; save(); renderAll(); };
-  targetMarginPctEl.oninput = ()=>{ state.targetMarginPct = Number(targetMarginPctEl.value)||0; save(); renderAll(); };
+function toCSV(rows){
+  const header=['variety','grade','supplier','packSize','stemsPerPack','packPrice','invoiceDate','notes'];
+  const body=rows.map(r=>[r.variety,r.grade||'',r.supplier||'',r.packSize||'',r.stemsPerPack||0,r.packPrice||0,r.invoiceDate||'',r.notes||''].map(v=>String(v).includes(',')?`"${String(v).replace(/"/g,'""')}"`:String(v)).join(','));
+  return [header.join(','),...body].join('\n');
 }
+if (exportCSVBtn) exportCSVBtn.onclick=()=>{ const csv=toCSV(state.rows); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='flower_costs.csv'; a.click(); URL.revokeObjectURL(url); };
 
-addRowBtn.onclick = ()=>{
-  state.rows.push({ id: uid(), variety:'', grade:'', supplier:'', packSize:'', stemsPerPack:0, packPrice:0, invoiceDate: new Date().toISOString().slice(0,10), notes:'' });
-  save(); renderAll();
-};
-addItemBtn.onclick = ()=>{
-  if (state.rows.length === 0) return;
-  state.arrangement.push({ rowId: state.rows[0].id, qty: 1 });
-  save(); renderAll();
-};
-exportCSVBtn.onclick = ()=>{
-  const csv = toCSV(state.rows);
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'flower_costs.csv'; a.click();
-  URL.revokeObjectURL(url);
-};
-importCSVEl.onchange = (e)=>{
-  const f = e.target.files?.[0];
-  if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const text = String(reader.result || '');
-    const imported = parseCSV(text);
-    state.rows = state.rows.concat(imported);
-    save(); renderAll();
+if (importCSVEl) importCSVEl.onchange=(e)=>{
+  const f=e.target.files?.[0]; if(!f) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const parsed = parseCSV(String(reader.result||''));
+      const H = parsed.header;
+      const get = (cells, names) => { const i = idx(H, names); return i>=0 ? cells[i] : ''; };
+      let added = 0;
+      for (const line of parsed.rows){
+        const r = {
+          id: uid(),
+          variety: get(line, ['variety','flower','name']),
+          grade: get(line, ['grade','length','size']),
+          supplier: get(line, ['supplier','vendor']),
+          packSize: get(line, ['packsize','pack_size','pack']),
+          stemsPerPack: Number(get(line, ['stemsperpack','stems_per_pack','stems']))||0,
+          packPrice: Number(get(line, ['packprice','pack_price','price']))||0,
+          invoiceDate: get(line, ['invoicedate','invoice_date','date']) || new Date().toISOString().slice(0,10),
+          notes: get(line, ['notes','note','comment']),
+        };
+        // Skip completely empty rows
+        if (!r.variety && !r.packPrice && !r.stemsPerPack) continue;
+        state.rows.push(r);
+        added++;
+      }
+      save(); renderAll();
+      alert(`Imported CSV rows: ${added} (delimiter "${parsed.delim === '\\t' ? 'TAB' : parsed.delim}")`);
+    }catch(err){
+      console.error(err);
+      alert('CSV import error: ' + (err?.message||String(err)));
+    }
   };
   reader.readAsText(f);
 };
 
-let deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', (e)=>{
-  e.preventDefault();
-  deferredPrompt = e;
-  const btn = document.getElementById('installBtn');
-  btn.hidden = false;
-  btn.onclick = async ()=>{
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    deferredPrompt = null;
-    btn.hidden = true;
-  };
-});
+// ---------- Photo Assist stubs (unchanged) ----------
+const photoInput=document.getElementById('photoInput'); const photoCanvas=document.getElementById('photoCanvas'); const ctx=photoCanvas?photoCanvas.getContext('2d'):null; const photoVarietySelect=document.getElementById('photoVarietySelect'); const clearBtn=document.getElementById('clearMarkers');
+function renderPhotoVarietyOptions(){ if (!photoVarietySelect) return; photoVarietySelect.innerHTML='<option value=\"\">Select flower...</option>'+state.rows.map(r=>`<option value=\"${r.id}\">${r.variety} ${r.grade?`(${r.grade})`:''}</option>`).join(''); }
+if (photoInput) photoInput.onchange=async (e)=>{ const f=e.target.files?.[0]; if(!f)return; const reader=new FileReader(); reader.onload=(evt)=>{ const img=new Image(); img.onload=()=>{ state.photo=img; state.photoMarkers=[]; if(clearBtn) clearBtn.disabled=true; drawPhoto(); }; img.src=evt.target.result; }; reader.readAsDataURL(f); };
+function drawPhoto(){ if(!photoCanvas||!ctx){ return; } const img=state.photo; if(!img){ photoCanvas.width=1000; photoCanvas.height=600; ctx.fillStyle='#f3f4f6'; ctx.fillRect(0,0,photoCanvas.width,photoCanvas.height); ctx.fillStyle='#64748b'; ctx.fillText('Load a photo to start',20,30); return; } const maxW=photoCanvas.parentElement.clientWidth-2; const scale=Math.min(maxW/img.width,1); photoCanvas.width=Math.floor(img.width*scale); photoCanvas.height=Math.floor(img.height*scale); ctx.clearRect(0,0,photoCanvas.width,photoCanvas.height); ctx.drawImage(img,0,0,photoCanvas.width,photoCanvas.height); for(const m of state.photoMarkers){ const x=m.x*scale,y=m.y*scale; ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fillStyle='#0EA5E9aa'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#0EA5E9'; ctx.stroke(); } }
+if (photoCanvas) photoCanvas.addEventListener('click',(e)=>{ if(!state.photo)return; const sel=photoVarietySelect.value; if(!sel){ alert('Select a flower first'); return; } const rect=photoCanvas.getBoundingClientRect(); const x=e.clientX-rect.left; const y=e.clientY-rect.top; const scale=photoCanvas.width/state.photo.width; const ix=x/scale, iy=y/scale; state.photoMarkers.push({x:ix,y:iy,rowId:sel}); if(clearBtn) clearBtn.disabled=false; const idx=state.arrangement.findIndex(a=>a.rowId===sel); if(idx>=0) state.arrangement[idx].qty=(state.arrangement[idx].qty||0)+1; else state.arrangement.push({rowId:sel,qty:1}); save(); drawPhoto(); renderAll(); });
+if (clearBtn) clearBtn.onclick=()=>{ state.photoMarkers=[]; clearBtn.disabled=true; drawPhoto(); };
 
-function renderPhotoVarietyOptions(){
-  const select = document.getElementById('photoVarietySelect');
-  select.innerHTML = '<option value=\"\">Select flower...</option>' + state.rows.map(r=>`<option value=\"${r.id}\">${r.variety} ${r.grade?`(${r.grade})`:''}</option>`).join('');
-}
-
-photoInput.onchange = async (e)=>{
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const blobURL = URL.createObjectURL(file);
-  const img = await createImageBitmap(await (await fetch(blobURL)).blob());
-  state.photo = img;
-  drawPhoto();
-  state.photoMarkers = [];
-  document.getElementById('clearMarkers').disabled = true;
-};
-
-function drawPhoto(){
-  const img = state.photo;
-  const canvas = photoCanvas;
-  const ctx = photoCtx;
-  if (!img){
-    canvas.width = 1000; canvas.height = 600;
-    ctx.fillStyle = '#f3f4f6'; ctx.fillRect(0,0,canvas.width, canvas.height);
-    ctx.fillStyle = '#64748b'; ctx.fillText('Load a photo to start', 20, 30);
-    return;
-  }
-  const maxW = canvas.parentElement.clientWidth - 2;
-  const scale = Math.min(maxW / img.width, 1);
-  canvas.width = Math.floor(img.width * scale);
-  canvas.height = Math.floor(img.height * scale);
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-  for (const m of state.photoMarkers){
-    const x = m.x * scale, y = m.y * scale;
-    ctx.beginPath();
-    ctx.arc(x, y, 8, 0, Math.PI*2);
-    ctx.fillStyle = '#0EA5E9aa';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#0EA5E9';
-    ctx.stroke();
-  }
-}
-
-photoCanvas.addEventListener('click', (e)=>{
-  if (!state.photo) return;
-  const sel = document.getElementById('photoVarietySelect').value;
-  if (!sel) { alert('Select a flower variety first'); return; }
-  const rect = photoCanvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  const scale = photoCanvas.width / state.photo.width;
-  const ix = x / scale;
-  const iy = y / scale;
-  state.photoMarkers.push({ x: ix, y: iy, rowId: sel });
-  document.getElementById('clearMarkers').disabled = false;
-  const idx = state.arrangement.findIndex(a=>a.rowId===sel);
-  if (idx >= 0) state.arrangement[idx].qty = (state.arrangement[idx].qty||0) + 1;
-  else state.arrangement.push({ rowId: sel, qty: 1 });
-  save();
-  drawPhoto();
-  renderAll();
-});
-document.getElementById('clearMarkers').onclick = ()=>{
-  state.photoMarkers = [];
-  document.getElementById('clearMarkers').disabled = true;
-  drawPhoto();
-};
-
-function renderAll(){
-  bindSettings();
-  renderCostTable();
-  renderArrangement();
-  bindArrangementInputs();
-  renderBreakdown();
-  renderPhotoVarietyOptions();
-  drawPhoto();
-}
-renderAll();
+// ---------- Boot ----------
+function renderAll(){ bindSettings(); renderCostTable(); renderArrangement(); renderBreakdown(); renderPhotoVarietyOptions(); drawPhoto(); }
