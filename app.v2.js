@@ -1,5 +1,13 @@
 
-import { classifySingle } from './detect.js';
+// detect.js is optional for now – don't let it break the app
+let classifySingle = null;
+try {
+  const mod = await import('./detect.js');
+  classifySingle = mod.classifySingle || null;
+} catch (e) {
+  console.warn('detect.js not loaded (optional):', e);
+}
+
 
 
 
