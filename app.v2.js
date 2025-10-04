@@ -121,54 +121,102 @@ function idx(header, names){
   return -1;
 }
 function tryImportText(text){
+  // ---- helpers (scoped to this function only) ----
+  function parseMaybeDate(s){
+    if (!s) return null;
+    s = String(s).trim();
+    const iso = /^\d{4}-\d{2}-\d{2}$/;                      // 2025-09-28
+    const dmySlash = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;   // 28/09/2025
+    const dmyDash  = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/;     // 28-09-25
+    const dmyText  = /^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})$/; // 28 Sep 2025
+    const MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+    const clampYear = y => (Number(y) < 100 ? 2000 + Number(y) : Number(y));
+    const z = n => (n<10?'0':'') + n;
+
+    if (iso.test(s)) return s;
+    let m;
+    if ((m = s.match(dmySlash))) { const d=+m[1], mo=+m[2], y=clampYear(m[3]); if (d&&mo&&y) return `${y}-${z(mo)}-${z(d)}`; }
+    if ((m = s.match(dmyDash)))  { const d=+m[1], mo=+m[2], y=clampYear(m[3]); if (d&&mo&&y) return `${y}-${z(mo)}-${z(d)}`; }
+    if ((m = s.match(dmyText)))  { const d=+m[1], mo=MONTHS[m[2].slice(0,3).toLowerCase()], y=clampYear(m[3]); if (d&&mo&&y) return `${y}-${z(mo)}-${z(d)}`; }
+    return null;
+  }
+
+  function detectInvoiceDateFromText(raw){
+    if (!raw) return null;
+    const lines = String(raw).split(/\r?\n/).slice(0, 120); // look near top
+    const dateLike = /(\b\d{4}-\d{2}-\d{2}\b)|(\b\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}\b)|(\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}\b)/g;
+    const HINT = /(invoice|inv|date|delivery|del\.?\s*date|doc|issued|order)/i;
+    const hits = [];
+    for (const line of lines){
+      const near = HINT.test(line);
+      const found = line.match(dateLike);
+      if (found){
+        for (const tok of found){
+          const iso = parseMaybeDate(tok);
+          if (iso) hits.push({ iso, score: near ? 2 : 1 });
+        }
+      }
+    }
+    if (!hits.length) return null;
+    hits.sort((a,b)=>b.score-a.score);
+    return hits[0].iso;
+  }
+
+  const toNum = (s) => {
+    if (!s) return 0;
+    let t = String(s).trim();
+    t = t.replace(/[^\d,.\-]/g, ''); // drop currency symbols etc
+    if (t.indexOf(',') > -1 && (t.lastIndexOf(',') > t.lastIndexOf('.'))) {
+      t = t.replace(/\./g, '').replace(',', '.'); // 1.234,56 -> 1234.56
+    } else {
+      t = t.replace(/,/g, '');                    // 1,234.56 -> 1234.56
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : 0;
+  };
+
   try{
     logStatus('Parsing text…');
     const parsed = parseCSV(text);
     const H = parsed.header;
     logStatus('Header: ' + JSON.stringify(H));
+
     const get = (cells, names) => { const i = idx(H, names); return i>=0 ? cells[i] : ''; };
 
-    // helper to normalise numbers like "€1.234,50" or "£15.60"
-    const toNum = (s) => {
-      if (!s) return 0;
-      let t = String(s).trim();
-      t = t.replace(/[^\d,.\-]/g, ''); // drop currency symbols etc
-      // if comma is decimal separator (and dot used as thousands), convert
-      if (t.indexOf(',') > -1 && (t.lastIndexOf(',') > t.lastIndexOf('.'))) {
-        t = t.replace(/\./g, '').replace(',', '.');
-      } else {
-        t = t.replace(/,/g, '');
-      }
-      const n = Number(t);
-      return Number.isFinite(n) ? n : 0;
-    };
+    // ---- Detect an invoice-level date if no per-row date exists ----
+    const hasPerRowDate = idx(H, ['invoicedate','invoice_date','date','deliverydate','deldate','docdate']) >= 0;
+    let invoiceLevelDate = hasPerRowDate ? null : detectInvoiceDateFromText(text);
+    if (!hasPerRowDate && !invoiceLevelDate){
+      const ask = prompt('No invoice date found in the file. Enter invoice date (e.g., 28/09/2025 or 2025-09-28):','');
+      const iso = parseMaybeDate(ask);
+      if (iso) invoiceLevelDate = iso;
+    }
 
     let added = 0;
     for (const line of parsed.rows){
       let r = {
         id: uid(),
-        variety: get(line, ['variety','flower','name']),
-        grade: get(line, ['grade','length','size']),
-        supplier: get(line, ['supplier','vendor']),
-        packSize: get(line, ['packsize','pack_size','pack']),
-        stemsPerPack: toNum(get(line, ['stemsperpack','stems_per_pack','stems'])),
-        packPrice: toNum(get(line, ['packprice','pack_price','price'])),
-        invoiceDate: get(line, ['invoicedate','invoice_date','date']) || new Date().toISOString().slice(0,10),
-        notes: get(line, ['notes','note','comment']),
+        variety: get(line, ['variety','flower','name','product','description','item','article']),
+        grade: get(line, ['grade','length','size','stemlength','cm','len']),
+        supplier: get(line, ['supplier','vendor','wholesaler','source']),
+        packSize: get(line, ['packsize','pack_size','pack','bunch','bunchsize','unit']),
+        stemsPerPack: toNum(get(line, ['stemsperpack','stems_per_pack','stemsperbunch','stemsbunch','stems','qty','quantity'])),
+        packPrice: toNum(get(line, ['packprice','pack_price','bunchprice','priceperbunch','price','unitprice','bunchnet','netprice'])),
+        invoiceDate: (get(line, ['invoicedate','invoice_date','date','deliverydate','deldate','docdate']) || invoiceLevelDate || ''),
+        notes: get(line, ['notes','note','comment','comments','remarks','remark','trailing_code']),
       };
 
-      // If nothing matched by header, try a positional fallback:
-      // [0]=variety, [1]=grade, [2]=stemsPerPack, [3]=packPrice, [4]=invoiceDate
-      const emptyByHeader = !r.variety && !r.grade && !r.supplier && !r.packSize && !r.stemsPerPack && !r.packPrice && !r.notes;
+      // Fallback mapping if headers didn’t match at all:
+      const emptyByHeader = !r.variety && !r.grade && !r.supplier && !r.packSize && !r.stemsPerPack && !r.packPrice && !r.invoiceDate && !r.notes;
       if (emptyByHeader && line.length >= 4){
         r.variety = r.variety || line[0] || '';
         r.grade   = r.grade   || line[1] || '';
         r.stemsPerPack = r.stemsPerPack || toNum(line[2]);
         r.packPrice    = r.packPrice    || toNum(line[3]);
-        if (!r.invoiceDate && line[4]) r.invoiceDate = line[4];
+        if (!r.invoiceDate && line[4]) r.invoiceDate = parseMaybeDate(line[4]) || line[4];
       }
 
-      // Skip truly empty lines
+      // Skip truly empty rows
       if (!r.variety && !r.packPrice && !r.stemsPerPack) continue;
 
       state.rows.push(r);
@@ -184,7 +232,6 @@ function tryImportText(text){
     alert('CSV import error: ' + (err?.message||String(err)));
   }
 }
-
 
 // ---------- DOM refs ----------
 const addRowBtn = document.getElementById('addRow');
