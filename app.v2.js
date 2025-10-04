@@ -127,29 +127,64 @@ function tryImportText(text){
     const H = parsed.header;
     logStatus('Header: ' + JSON.stringify(H));
     const get = (cells, names) => { const i = idx(H, names); return i>=0 ? cells[i] : ''; };
+
+    // helper to normalise numbers like "€1.234,50" or "£15.60"
+    const toNum = (s) => {
+      if (!s) return 0;
+      let t = String(s).trim();
+      t = t.replace(/[^\d,.\-]/g, ''); // drop currency symbols etc
+      // if comma is decimal separator (and dot used as thousands), convert
+      if (t.indexOf(',') > -1 && (t.lastIndexOf(',') > t.lastIndexOf('.'))) {
+        t = t.replace(/\./g, '').replace(',', '.');
+      } else {
+        t = t.replace(/,/g, '');
+      }
+      const n = Number(t);
+      return Number.isFinite(n) ? n : 0;
+    };
+
     let added = 0;
     for (const line of parsed.rows){
-      const r = {
+      let r = {
         id: uid(),
         variety: get(line, ['variety','flower','name']),
         grade: get(line, ['grade','length','size']),
         supplier: get(line, ['supplier','vendor']),
         packSize: get(line, ['packsize','pack_size','pack']),
-        stemsPerPack: Number(get(line, ['stemsperpack','stems_per_pack','stems']))||0,
-        packPrice: Number(get(line, ['packprice','pack_price','price']))||0,
+        stemsPerPack: toNum(get(line, ['stemsperpack','stems_per_pack','stems'])),
+        packPrice: toNum(get(line, ['packprice','pack_price','price'])),
         invoiceDate: get(line, ['invoicedate','invoice_date','date']) || new Date().toISOString().slice(0,10),
         notes: get(line, ['notes','note','comment']),
       };
+
+      // If nothing matched by header, try a positional fallback:
+      // [0]=variety, [1]=grade, [2]=stemsPerPack, [3]=packPrice, [4]=invoiceDate
+      const emptyByHeader = !r.variety && !r.grade && !r.supplier && !r.packSize && !r.stemsPerPack && !r.packPrice && !r.notes;
+      if (emptyByHeader && line.length >= 4){
+        r.variety = r.variety || line[0] || '';
+        r.grade   = r.grade   || line[1] || '';
+        r.stemsPerPack = r.stemsPerPack || toNum(line[2]);
+        r.packPrice    = r.packPrice    || toNum(line[3]);
+        if (!r.invoiceDate && line[4]) r.invoiceDate = line[4];
+      }
+
+      // Skip truly empty lines
       if (!r.variety && !r.packPrice && !r.stemsPerPack) continue;
-      state.rows.push(r); added++;
+
+      state.rows.push(r);
+      added++;
     }
+
     save(); renderAll();
     logStatus(`Imported CSV rows: ${added} (delimiter "${parsed.delim === '\\t' ? 'TAB' : parsed.delim}")`);
     alert(`Imported CSV rows: ${added}`);
   }catch(err){
-    console.error(err); logStatus('CSV import error: ' + (err?.message||String(err))); alert('CSV import error: ' + (err?.message||String(err)));
+    console.error(err);
+    logStatus('CSV import error: ' + (err?.message||String(err)));
+    alert('CSV import error: ' + (err?.message||String(err)));
   }
 }
+
 
 // ---------- DOM refs ----------
 const addRowBtn = document.getElementById('addRow');
