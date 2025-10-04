@@ -158,6 +158,148 @@
     });
   }
 </script>
+<!-- CSV HOTFIX: writes parsed rows to localStorage and reloads -->
+<script id="csv-hotfix" type="module">
+  const LS_KEY = 'stemwise-app-v1';
+
+  // Normalize header names like "stems per bunch" -> "stemsperbunch"
+  const norm = s => String(s||'').toLowerCase().replace(/[\s_-]+/g,'').replace(/[^\w]/g,'');
+
+  // Detect delimiter
+  const detectDelim = (sample) => {
+    const cands = [',',';','\t','|'];
+    let best=',', bestScore=-1;
+    const lines = sample.split(/\r?\n/).filter(Boolean).slice(0,10);
+    for (const d of cands){
+      const cnts = lines.map(l => (l.match(new RegExp(d==='\\t'?'\\t':d,'g'))||[]).length);
+      const mean = cnts.reduce((a,b)=>a+b,0)/(cnts.length||1);
+      const varc = cnts.reduce((a,b)=>a + Math.pow(b-mean,2),0)/(cnts.length||1);
+      const score = mean - 0.5*varc;
+      if (score>bestScore){ bestScore=score; best=d; }
+    }
+    return best;
+  };
+
+  // CSV split with quotes
+  const splitLine = (line, d) => {
+    const out=[]; let cur=''; let q=false;
+    for (let i=0;i<line.length;i++){
+      const ch=line[i];
+      if (ch === '"'){ if(q && line[i+1]==='"'){ cur+='"'; i++; } else { q=!q; } continue; }
+      if (ch===d && !q){ out.push(cur); cur=''; } else { cur+=ch; }
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  };
+
+  // Parse CSV text into {header, rows, delim}
+  const parseCSV = (text) => {
+    const lines = String(text||'').split(/\r?\n/);
+    if (!lines.length) return {header:[], rows:[], delim:','};
+    const delim = detectDelim(lines.slice(0,10).join('\n'));
+    const header = splitLine(lines.shift(), delim).map(norm);
+    const rows = [];
+    for (const line of lines){ if(line.trim()) rows.push(splitLine(line, delim)); }
+    return {header, rows, delim};
+  };
+
+  // Handy number parser for things like "€1.234,56"
+  const toNum = (s) => {
+    if (s==null) return 0;
+    let t = String(s).trim();
+    t = t.replace(/[^\d,.\-]/g,'');
+    if (t.indexOf(',')>-1 && t.lastIndexOf(',')>t.lastIndexOf('.')) {
+      t = t.replace(/\./g,'').replace(',', '.');   // 1.234,56 -> 1234.56
+    } else {
+      t = t.replace(/,/g,'');                      // 1,234.56 -> 1234.56
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Make ID
+  const uid = () => Math.random().toString(36).slice(2,10);
+
+  // Map header aliases for your supplier (Flowervision sample)
+  const pickIdx = (H, names) => {
+    names = Array.isArray(names)?names:[names];
+    for (const n of names){ const i = H.indexOf(norm(n)); if (i!==-1) return i; }
+    return -1;
+  };
+
+  function importCSVText(text){
+    const {header:H, rows} = parseCSV(text);
+
+    // Aliases tuned for your file: qty, stemsperbunch, description, unitprice, linetotal, lengthcm
+    const I = {
+      variety:       pickIdx(H, ['description','product','name','item']),
+      grade:         pickIdx(H, ['lengthcm','length','size','cm']),
+      stemsPerPack:  pickIdx(H, ['stemsperbunch','stemsperpack','stems','qty','quantity']),
+      packPrice:     pickIdx(H, ['unitprice','price','bunchprice','packprice']),
+      invoiceDate:   pickIdx(H, ['invoicedate','invoice_date','date','deliverydate','docdate','deldate']),
+      supplier:      pickIdx(H, ['supplier','vendor','wholesaler']),
+      packSize:      pickIdx(H, ['packsize','bunchsize','unit','pack'])
+    };
+
+    // If no per-row date col, ask once
+    let invoiceLevelDate = '';
+    if (I.invoiceDate === -1) {
+      const ask = prompt('Enter invoice date for these rows (e.g. 28/09/2025 or 2025-09-28):','');
+      invoiceLevelDate = ask || '';
+    }
+
+    // Build new rows
+    const newRows = [];
+    for (const line of rows){
+      const r = {
+        id: uid(),
+        variety:      I.variety      >=0 ? line[I.variety] : '',
+        grade:        I.grade        >=0 ? line[I.grade] : '',
+        supplier:     I.supplier     >=0 ? line[I.supplier] : '',
+        packSize:     I.packSize     >=0 ? line[I.packSize] : '',
+        stemsPerPack: I.stemsPerPack >=0 ? toNum(line[I.stemsPerPack]) : 0,
+        packPrice:    I.packPrice    >=0 ? toNum(line[I.packPrice]) : 0,
+        invoiceDate:  I.invoiceDate  >=0 ? String(line[I.invoiceDate]) : String(invoiceLevelDate),
+        notes: ''
+      };
+      // Skip truly empty lines
+      if (!r.variety && !r.packPrice && !r.stemsPerPack) continue;
+      newRows.push(r);
+    }
+
+    // Merge into localStorage state and reload
+    let state;
+    try {
+      state = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    } catch { state = {}; }
+
+    if (!state || typeof state !== 'object') state = {};
+    if (!Array.isArray(state.rows)) state.rows = [];
+
+    state.rows = state.rows.concat(newRows);
+
+    // sensible defaults if missing
+    if (!state.vatRegisteredFrom) state.vatRegisteredFrom = '2025-10-01';
+    if (typeof state.vatRate !== 'number') state.vatRate = 20;
+    if (typeof state.laborRate !== 'number') state.laborRate = 18;
+    if (!Array.isArray(state.arrangement)) state.arrangement = [];
+    state.photo = null; // never persist images
+
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    alert(`Imported CSV rows: ${newRows.length}`);
+    location.reload(); // let the app render them
+  }
+
+  function hookImport(){
+    const el = document.getElementById('importCSV');
+    if (!el) return;
+    // Overwrite any previous handler so *this* runs
+    el.onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) { alert('No file picked'); return; }
+      const reader = new FileReader();
+      reader.onload = () => importCSVText(String(reader.result||'
+::contentReference[oaicite:0]{index=0}
 
 </body>
 </html>
