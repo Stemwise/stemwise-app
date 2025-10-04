@@ -270,6 +270,7 @@ const exportCSVBtn = document.getElementById('exportCSV');
 
 const vatRegisteredFromEl = document.getElementById('vatRegisteredFrom');
 const vatRateEl = document.getElementById('vatRate');
+const pricesIncludeVATEl = document.getElementById('pricesIncludeVAT');
 const laborRateEl = document.getElementById('laborRate');
 const globalFeesEl = document.getElementById('globalFees');
 const feeShareModeEl = document.getElementById('feeShareMode');
