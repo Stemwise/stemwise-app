@@ -261,10 +261,17 @@
     <span>Offline-ready • Your data stays in your browser (local storage)</span>
   </footer>
 
-  <script type="module" src="./detect.js"></script>
-  <script type="module" src="./app.v2.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(console.error); }); }
-  </script>
+<!-- Load the fixed app bundle (cache-busted) -->
+<script type="module" src="./app.v2.js?v=force8"></script>
+
+<!-- (Optional) keep SW, but only after app loads -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(console.error);
+    });
+  }
+</script>
+
 </body>
 </html>
