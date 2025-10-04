@@ -197,6 +197,16 @@ function tryImportText(text){
     logStatus('Parsing text…');
     const parsed = parseCSV(text);
     const H = parsed.header;
+    // Supplier fallback: Flowervision items CSV
+if (
+  H.includes('description') &&
+  H.includes('stemsperbunch') &&
+  H.includes('unitprice')
+){
+  // nothing to do: our aliases will now resolve
+  logStatus('Flowervision mapping detected: description/unitprice/stemsperbunch/lengthcm');
+}
+
     logStatus('Header: ' + JSON.stringify(H));
 
     const get = (cells, names) => { const i = idx(H, names); return i>=0 ? cells[i] : ''; };
