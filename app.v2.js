@@ -46,7 +46,13 @@ const state = {
 
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function money(n){ if (Number.isNaN(n)) return '£0.00'; return new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP',maximumFractionDigits:2}).format(n); }
-function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
+function save(){
+  try {
+    const toStore = { ...state, photo: null }; // never persist the Image object
+    localStorage.setItem(LS_KEY, JSON.stringify(toStore));
+  } catch(e){}
+}
+
 function load(){
   try {
     const raw = localStorage.getItem(LS_KEY);
