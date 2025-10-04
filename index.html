@@ -10,121 +10,7 @@
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
-  <!-- EMERGENCY CSV PROBE: paste this just before </body> -->
-<script>
-(function(){
-  // Status box
-  function ensureStatus(){
-    let box = document.getElementById('csvStatusBox');
-    if (!box){
-      box = document.createElement('div');
-      box.id = 'csvStatusBox';
-      box.style.cssText = 'position:fixed;right:12px;bottom:12px;max-width:420px;background:#0f172a;color:#e5e7eb;border-radius:10px;padding:10px 12px;font:12px/1.4 system-ui,Segoe UI,Roboto,Arial;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.24)';
-      box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">CSV Diagnostics</div><div id="csvStatus" style="white-space:pre-wrap;max-height:220px;overflow:auto">Ready…</div>';
-      document.body.appendChild(box);
-    }
-    return document.getElementById('csvStatus');
-  }
-  const logEl = ensureStatus();
-  function log(m){ logEl.textContent += "\n" + m; logEl.scrollTop = logEl.scrollHeight; }
 
-  // Ensure there is a file input with the correct ID
-  let input = document.getElementById('importCSV');
-  if (!input) {
-    input = document.createElement('input');
-    input.type = 'file';
-    input.id = 'importCSV';
-    input.accept = '.csv';
-    input.style = 'position:fixed;left:12px;bottom:12px;z-index:99999';
-    document.body.appendChild(input);
-    log('No #importCSV found — created a temporary one (bottom-left).');
-  } else {
-    log('#importCSV found.');
-  }
-
-  function detectDelimiter(sample){
-    const candidates=[",",";","\\t","|"];
-    let best=",", bestScore=-1;
-    const lines = sample.split(/\\r?\\n/).filter(Boolean).slice(0,10);
-    for (const d of candidates){
-      const counts = lines.map(l => (l.match(new RegExp(d==="\\t"?"\\t":d, "g"))||[]).length);
-      const mean = counts.reduce((a,b)=>a+b,0)/(counts.length||1);
-      const varc = counts.reduce((a,b)=>a + Math.pow(b-mean,2),0)/(counts.length||1);
-      const score = mean - 0.5*varc;
-      if (score>bestScore){ bestScore=score; best=d; }
-    }
-    return best;
-  }
-  function splitLine(line, delim){
-    const out=[]; let cur=""; let q=false;
-    for (let i=0;i<line.length;i++){
-      const ch=line[i];
-      if (ch === '"'){ if (q && line[i+1]==='"'){ cur+='"'; i++; } else { q=!q; } continue; }
-      if (ch === delim && !q){ out.push(cur); cur=""; } else { cur+=ch; }
-    }
-    out.push(cur); return out.map(s=>s.trim());
-  }
-  function parseCSV(text){
-    const lines = String(text||"").split(/\\r?\\n/);
-    if (!lines.length){ return {header:[],rows:[],delim:","}; }
-    const delim = detectDelimiter(lines.slice(0,10).join("\\n"));
-    const header = splitLine(lines.shift(), delim).map(h => h.toLowerCase().replace(/[\\s_-]+/g,"").replace(/[^\\w]/g,""));
-    const rows = [];
-    for (const line of lines){
-      if (!line.trim()) continue;
-      rows.push(splitLine(line, delim));
-    }
-    return {header,rows,delim};
-  }
-  function idx(header, aliases){
-    aliases = Array.isArray(aliases)?aliases:[aliases];
-    for (const a of aliases){
-      const n=a.toLowerCase().replace(/[\\s_-]+/g,"").replace(/[^\\w]/g,"");
-      const i=header.indexOf(n); if(i!==-1) return i;
-    }
-    return -1;
-  }
-
-  function handleFile(f){
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result||"");
-      log("Read " + text.length + " chars from " + f.name);
-      const parsed = parseCSV(text);
-      log("Detected delimiter: " + (parsed.delim==="\\t"?"TAB":parsed.delim));
-      log("Header: " + JSON.stringify(parsed.header));
-      const map = {
-        variety: idx(parsed.header, ["variety","flower","name","description","product","item"]),
-        grade: idx(parsed.header, ["grade","length","size","lengthcm","cm","len"]),
-        stemsPerPack: idx(parsed.header, ["stemsperpack","stems_per_pack","stemsperbunch","stems","qty","quantity"]),
-        packPrice: idx(parsed.header, ["packprice","pack_price","bunchprice","unitprice","price"]),
-        invoiceDate: idx(parsed.header, ["invoicedate","invoice_date","date","deliverydate","docdate","deldate"])
-      };
-      log("Mapped indexes: " + JSON.stringify(map));
-      if (parsed.rows.length){
-        log("First row raw: " + JSON.stringify(parsed.rows[0]));
-      } else {
-        log("No data rows detected.");
-      }
-      alert("CSV read OK. Check the black 'CSV Diagnostics' panel (bottom-right) for details.");
-    };
-    reader.onerror = () => { log("FileReader error: " + reader.error); alert("Read error: " + reader.error); };
-    reader.readAsText(f);
-  }
-
-  input.addEventListener('change', e => {
-    const f = e.target.files && e.target.files[0];
-    if (f) handleFile(f); else log("No file picked.");
-  });
-
-  // Also allow drag & drop anywhere
-  document.addEventListener("dragover", e => e.preventDefault());
-  document.addEventListener("drop", e => { e.preventDefault(); const f=e.dataTransfer?.files?.[0]; if(f){ handleFile(f); } });
-
-  log('CSV probe loaded. Use the file picker (bottom-left) or drag a CSV onto the page.');
-})();
-</script>
-<!-- /EMERGENCY CSV PROBE -->
 
 <body>
   <header class="topbar">
@@ -272,6 +158,120 @@
     });
   }
 </script>
+  <!-- EMERGENCY CSV PROBE: paste this just before </body> -->
+<script>
+(function(){
+  // Status box
+  function ensureStatus(){
+    let box = document.getElementById('csvStatusBox');
+    if (!box){
+      box = document.createElement('div');
+      box.id = 'csvStatusBox';
+      box.style.cssText = 'position:fixed;right:12px;bottom:12px;max-width:420px;background:#0f172a;color:#e5e7eb;border-radius:10px;padding:10px 12px;font:12px/1.4 system-ui,Segoe UI,Roboto,Arial;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.24)';
+      box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">CSV Diagnostics</div><div id="csvStatus" style="white-space:pre-wrap;max-height:220px;overflow:auto">Ready…</div>';
+      document.body.appendChild(box);
+    }
+    return document.getElementById('csvStatus');
+  }
+  const logEl = ensureStatus();
+  function log(m){ logEl.textContent += "\n" + m; logEl.scrollTop = logEl.scrollHeight; }
 
+  // Ensure there is a file input with the correct ID
+  let input = document.getElementById('importCSV');
+  if (!input) {
+    input = document.createElement('input');
+    input.type = 'file';
+    input.id = 'importCSV';
+    input.accept = '.csv';
+    input.style = 'position:fixed;left:12px;bottom:12px;z-index:99999';
+    document.body.appendChild(input);
+    log('No #importCSV found — created a temporary one (bottom-left).');
+  } else {
+    log('#importCSV found.');
+  }
+
+  function detectDelimiter(sample){
+    const candidates=[",",";","\\t","|"];
+    let best=",", bestScore=-1;
+    const lines = sample.split(/\\r?\\n/).filter(Boolean).slice(0,10);
+    for (const d of candidates){
+      const counts = lines.map(l => (l.match(new RegExp(d==="\\t"?"\\t":d, "g"))||[]).length);
+      const mean = counts.reduce((a,b)=>a+b,0)/(counts.length||1);
+      const varc = counts.reduce((a,b)=>a + Math.pow(b-mean,2),0)/(counts.length||1);
+      const score = mean - 0.5*varc;
+      if (score>bestScore){ bestScore=score; best=d; }
+    }
+    return best;
+  }
+  function splitLine(line, delim){
+    const out=[]; let cur=""; let q=false;
+    for (let i=0;i<line.length;i++){
+      const ch=line[i];
+      if (ch === '"'){ if (q && line[i+1]==='"'){ cur+='"'; i++; } else { q=!q; } continue; }
+      if (ch === delim && !q){ out.push(cur); cur=""; } else { cur+=ch; }
+    }
+    out.push(cur); return out.map(s=>s.trim());
+  }
+  function parseCSV(text){
+    const lines = String(text||"").split(/\\r?\\n/);
+    if (!lines.length){ return {header:[],rows:[],delim:","}; }
+    const delim = detectDelimiter(lines.slice(0,10).join("\\n"));
+    const header = splitLine(lines.shift(), delim).map(h => h.toLowerCase().replace(/[\\s_-]+/g,"").replace(/[^\\w]/g,""));
+    const rows = [];
+    for (const line of lines){
+      if (!line.trim()) continue;
+      rows.push(splitLine(line, delim));
+    }
+    return {header,rows,delim};
+  }
+  function idx(header, aliases){
+    aliases = Array.isArray(aliases)?aliases:[aliases];
+    for (const a of aliases){
+      const n=a.toLowerCase().replace(/[\\s_-]+/g,"").replace(/[^\\w]/g,"");
+      const i=header.indexOf(n); if(i!==-1) return i;
+    }
+    return -1;
+  }
+
+  function handleFile(f){
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result||"");
+      log("Read " + text.length + " chars from " + f.name);
+      const parsed = parseCSV(text);
+      log("Detected delimiter: " + (parsed.delim==="\\t"?"TAB":parsed.delim));
+      log("Header: " + JSON.stringify(parsed.header));
+      const map = {
+        variety: idx(parsed.header, ["variety","flower","name","description","product","item"]),
+        grade: idx(parsed.header, ["grade","length","size","lengthcm","cm","len"]),
+        stemsPerPack: idx(parsed.header, ["stemsperpack","stems_per_pack","stemsperbunch","stems","qty","quantity"]),
+        packPrice: idx(parsed.header, ["packprice","pack_price","bunchprice","unitprice","price"]),
+        invoiceDate: idx(parsed.header, ["invoicedate","invoice_date","date","deliverydate","docdate","deldate"])
+      };
+      log("Mapped indexes: " + JSON.stringify(map));
+      if (parsed.rows.length){
+        log("First row raw: " + JSON.stringify(parsed.rows[0]));
+      } else {
+        log("No data rows detected.");
+      }
+      alert("CSV read OK. Check the black 'CSV Diagnostics' panel (bottom-right) for details.");
+    };
+    reader.onerror = () => { log("FileReader error: " + reader.error); alert("Read error: " + reader.error); };
+    reader.readAsText(f);
+  }
+
+  input.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) handleFile(f); else log("No file picked.");
+  });
+
+  // Also allow drag & drop anywhere
+  document.addEventListener("dragover", e => e.preventDefault());
+  document.addEventListener("drop", e => { e.preventDefault(); const f=e.dataTransfer?.files?.[0]; if(f){ handleFile(f); } });
+
+  log('CSV probe loaded. Use the file picker (bottom-left) or drag a CSV onto the page.');
+})();
+</script>
+<!-- /EMERGENCY CSV PROBE -->
 </body>
 </html>
