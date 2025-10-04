@@ -38,6 +38,7 @@ function logStatus(msg){
 // ---------- State ----------
 const state = {
   rows: [],
+  pricesIncludeVAT: true,
   vatRegisteredFrom: '2025-10-01',
   vatRate: 20,
   laborRate: 18,
