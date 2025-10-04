@@ -274,15 +274,21 @@ function parseCSV(text){
 
   return { header, rows: body, delim };
 }
-
-  function idx(header, aliases){
-    aliases = Array.isArray(aliases)?aliases:[aliases];
-    for (const a of aliases){
-      const n=a.toLowerCase().replace(/[\\s_-]+/g,"").replace(/[^\\w]/g,"");
-      const i=header.indexOf(n); if(i!==-1) return i;
-    }
-    return -1;
+function idx(header, names){
+  const aliases = Array.isArray(names) ? names : [names];
+  const norm = s => s.toLowerCase().replace(/[\s_-]+/g,'').replace(/[^\w]/g,'');
+  for (const a of aliases){
+    const key = norm(a);
+    // exact match first
+    let i = header.indexOf(key);
+    if (i !== -1) return i;
+    // fuzzy: contains/contained-by
+    i = header.findIndex(h => h.includes(key) || key.includes(h));
+    if (i !== -1) return i;
   }
+  return -1;
+}
+
 
   function handleFile(f){
     const reader = new FileReader();
