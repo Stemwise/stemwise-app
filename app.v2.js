@@ -64,8 +64,11 @@ function load(){
       state.sundries = 1.1; state.wastagePct = 3; state.laborMinutes = 20;
       save();
     } else {
-      Object.assign(state, JSON.parse(raw));
-    }
+  Object.assign(state, JSON.parse(raw));
+  // If a previous session persisted a non-image (e.g. {}), reset to null
+  if (!(state.photo instanceof Image)) state.photo = null;
+}
+
   } catch(e) { console.warn(e); }
 }
 load();
