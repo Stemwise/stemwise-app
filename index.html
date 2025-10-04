@@ -212,18 +212,69 @@
     }
     out.push(cur); return out.map(s=>s.trim());
   }
-  function parseCSV(text){
-    const lines = String(text||"").split(/\\r?\\n/);
-    if (!lines.length){ return {header:[],rows:[],delim:","}; }
-    const delim = detectDelimiter(lines.slice(0,10).join("\\n"));
-    const header = splitLine(lines.shift(), delim).map(h => h.toLowerCase().replace(/[\\s_-]+/g,"").replace(/[^\\w]/g,""));
-    const rows = [];
-    for (const line of lines){
-      if (!line.trim()) continue;
-      rows.push(splitLine(line, delim));
-    }
-    return {header,rows,delim};
+function parseCSV(text){
+  // 1) Normalise newlines (handles \r\n, \n, and old Mac \r)
+  let raw = String(text || "");
+  raw = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // 2) Strip BOM and trim
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+  raw = raw.trim();
+
+  if (!raw) return { header: [], rows: [], delim: ',' };
+
+  // 3) Take a small sample for delimiter detection
+  const sample = raw.split("\n").slice(0, 20).join("\n");
+  const candidates = [',',';','\t','|'];
+  let best = ',', bestScore = -1;
+
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const linesForDetect = sample.split("\n").filter(Boolean).slice(0, 10);
+  for (const d of candidates){
+    const counts = linesForDetect.map(l => (l.match(new RegExp(esc(d), 'g')) || []).length);
+    const mean = counts.reduce((a,b)=>a+b,0)/(counts.length||1);
+    const variance = counts.reduce((a,b)=>a + Math.pow(b-mean,2),0)/(counts.length||1);
+    const score = mean - 0.5*variance;
+    if (score > bestScore){ bestScore = score; best = d; }
   }
+  const delim = best;
+
+  // 4) CSV-safe split for one line
+  function splitLine(line, d){
+    const out=[]; let cur=""; let q=false;
+    for (let i=0;i<line.length;i++){
+      const ch=line[i];
+      if (ch === '"'){ if (q && line[i+1]==='"'){ cur+='"'; i++; } else { q=!q; } continue; }
+      if (ch === d && !q){ out.push(cur); cur=""; } else { cur+=ch; }
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  }
+
+  // 5) Build rows
+  const lines = raw.split("\n").filter(l => l.trim().length);
+  if (!lines.length) return { header: [], rows: [], delim };
+
+  let header = splitLine(lines[0], delim).map(h => h.toLowerCase()
+    .replace(/[\s_-]+/g,'').replace(/[^\w]/g,''));
+
+  let body = lines.slice(1).map(l => splitLine(l, delim)).filter(r => r.some(c => c.length));
+
+  // 6) Fallbacks:
+  //   a) If header collapsed to a single token like "www", try the next non-empty line as header.
+  if (header.length < 2 && body.length){
+    header = body[0].map(h => String(h).toLowerCase()
+      .replace(/[\s_-]+/g,'').replace(/[^\w]/g,''));
+    body = body.slice(1);
+  }
+  //   b) If still no body but there are many delimiters overall, treat all lines after header as rows
+  if (!body.length && lines.length > 1){
+    body = lines.slice(1).map(l => splitLine(l, delim)).filter(r => r.some(c => c.length));
+  }
+
+  return { header, rows: body, delim };
+}
+
   function idx(header, aliases){
     aliases = Array.isArray(aliases)?aliases:[aliases];
     for (const a of aliases){
