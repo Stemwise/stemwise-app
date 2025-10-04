@@ -213,19 +213,27 @@ function renderCostTable(){
       <td class="muted">£${displayCostPerStemExVAT(r).toFixed(2)}</td>
       <td><input value="${r.notes||''}"/></td>
       <td><button class="btn danger">Del</button></td>`;
-    const [v,g,s,ps,sp,pp,id,_,n,del] = tr.querySelectorAll('input,button');
-    v.oninput=()=>{r.variety=v.value;save();renderAll();};
-    g.oninput=()=>{r.grade=g.value;save();renderAll();};
-    s.oninput=()=>{r.supplier=s.value;save();renderAll();};
-    ps.oninput=()=>{r.packSize=ps.value;save();renderAll();};
-    sp.oninput=()=>{r.stemsPerPack=Number(sp.value)||0;save();renderAll();};
-    pp.oninput=()=>{r.packPrice=Number(pp.value)||0;save();renderAll();};
-    id.oninput=()=>{r.invoiceDate=id.value;save();renderAll();};
-    n.oninput=()=>{r.notes=n.value;save();};
-    del.onclick=()=>{state.rows=state.rows.filter(x=>x!==r);save();renderAll();};
+
+    // ✅ Get elements explicitly (8 inputs + 1 button)
+    const inputs = tr.querySelectorAll('input');
+    const delBtn = tr.querySelector('button');
+    const [v, g, s, ps, sp, pp, id, n] = inputs;
+
+    v.oninput  = ()=>{ r.variety      = v.value;  save(); renderAll(); };
+    g.oninput  = ()=>{ r.grade        = g.value;  save(); renderAll(); };
+    s.oninput  = ()=>{ r.supplier     = s.value;  save(); renderAll(); };
+    ps.oninput = ()=>{ r.packSize     = ps.value; save(); renderAll(); };
+    sp.oninput = ()=>{ r.stemsPerPack = Number(sp.value)||0; save(); renderAll(); };
+    pp.oninput = ()=>{ r.packPrice    = Number(pp.value)||0; save(); renderAll(); };
+    id.oninput = ()=>{ r.invoiceDate  = id.value; save(); renderAll(); };
+    n.oninput  = ()=>{ r.notes        = n.value;  save(); };
+
+    delBtn.onclick = ()=>{ state.rows = state.rows.filter(x => x !== r); save(); renderAll(); };
+
     costTableBody.appendChild(tr);
   });
 }
+
 
 function renderArrangement(){
   if (!arrangementList) return;
