@@ -48,10 +48,11 @@ function uid(){ return Math.random().toString(36).slice(2,10); }
 function money(n){ if (Number.isNaN(n)) return '£0.00'; return new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP',maximumFractionDigits:2}).format(n); }
 function save(){
   try {
-    const toStore = { ...state, photo: null }; // never persist the Image object
+    const toStore = { ...state, photo: null };
     localStorage.setItem(LS_KEY, JSON.stringify(toStore));
   } catch(e){}
 }
+
 
 function load(){
   try {
@@ -406,7 +407,21 @@ document.addEventListener('drop',(e)=>{
 const photoInput=document.getElementById('photoInput'); const photoCanvas=document.getElementById('photoCanvas'); const ctx=photoCanvas?photoCanvas.getContext('2d'):null; const photoVarietySelect=document.getElementById('photoVarietySelect'); const clearBtn=document.getElementById('clearMarkers');
 function renderPhotoVarietyOptions(){ if (!photoVarietySelect) return; photoVarietySelect.innerHTML='<option value=\"\">Select flower...</option>'+state.rows.map(r=>`<option value=\"${r.id}\">${r.variety} ${r.grade?`(${r.grade})`:''}</option>`).join(''); }
 if (photoInput) photoInput.onchange=async (e)=>{ const f=e.target.files?.[0]; if(!f)return; const reader=new FileReader(); reader.onload=(evt)=>{ const img=new Image(); img.onload=()=>{ state.photo=img; state.photoMarkers=[]; if(clearBtn) clearBtn.disabled=true; drawPhoto(); }; img.src=evt.target.result; }; reader.readAsDataURL(f); };
-function drawPhoto(){ if(!photoCanvas||!ctx){ return; } const img=state.photo; if(!img){ photoCanvas.width=1000; photoCanvas.height=600; ctx.fillStyle='#f3f4f6'; ctx.fillRect(0,0,photoCanvas.width,photoCanvas.height); ctx.fillStyle='#64748b'; ctx.fillText('Load a photo to start',20,30); return; } const maxW=photoCanvas.parentElement.clientWidth-2; const scale=Math.min(maxW/img.width,1); photoCanvas.width=Math.floor(img.width*scale); photoCanvas.height=Math.floor(img.height*scale); ctx.clearRect(0,0,photoCanvas.width,photoCanvas.height); ctx.drawImage(img,0,0,photoCanvas.width,photoCanvas.height); for(const m of state.photoMarkers){ const x=m.x*scale,y=m.y*scale; ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fillStyle='#0EA5E9aa'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#0EA5E9'; ctx.stroke(); } }
+function drawPhoto(){
+  if (!photoCanvas || !ctx) return;
+  const img = state.photo;
+  if (!(img instanceof HTMLImageElement)) {
+    photoCanvas.width = 1000;
+    photoCanvas.height = 600;
+    ctx.fillStyle = '#f3f4f6';
+    ctx.fillRect(0,0,photoCanvas.width,photoCanvas.height);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('Load a photo to start',20,30);
+    return;
+  }
+  // ...rest unchanged
+}
+ const maxW=photoCanvas.parentElement.clientWidth-2; const scale=Math.min(maxW/img.width,1); photoCanvas.width=Math.floor(img.width*scale); photoCanvas.height=Math.floor(img.height*scale); ctx.clearRect(0,0,photoCanvas.width,photoCanvas.height); ctx.drawImage(img,0,0,photoCanvas.width,photoCanvas.height); for(const m of state.photoMarkers){ const x=m.x*scale,y=m.y*scale; ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fillStyle='#0EA5E9aa'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#0EA5E9'; ctx.stroke(); } }
 if (photoCanvas) photoCanvas.addEventListener('click',(e)=>{ if(!state.photo)return; const sel=photoVarietySelect.value; if(!sel){ alert('Select a flower first'); return; } const rect=photoCanvas.getBoundingClientRect(); const x=e.clientX-rect.left; const y=e.clientY-rect.top; const scale=photoCanvas.width/state.photo.width; const ix=x/scale, iy=y/scale; state.photoMarkers.push({x:ix,y:iy,rowId:sel}); if(clearBtn) clearBtn.disabled=false; const idx=state.arrangement.findIndex(a=>a.rowId===sel); if(idx>=0) state.arrangement[idx].qty=(state.arrangement[idx].qty||0)+1; else state.arrangement.push({rowId:sel,qty:1}); save(); drawPhoto(); renderAll(); });
 if (clearBtn) clearBtn.onclick=()=>{ state.photoMarkers=[]; clearBtn.disabled=true; drawPhoto(); };
 
